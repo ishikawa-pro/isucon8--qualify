@@ -328,7 +328,11 @@ func main() {
         Password: "", // no password set
         DB:       0,  // use default DB
     })
-    fmt.Sprintf("%+v", cache)
+    pong, cacheErr := cache.Ping().Result()
+    if cacheErr != nil {
+        panic(cacheErr)
+    }
+    fmt.Println(pong, err)
 
 	e := echo.New()
 	funcs := template.FuncMap{
@@ -381,14 +385,16 @@ func main() {
 			return err
 		}
 
-		//  var user User
+		// var user User
+        var login_name string
 		// if err := tx.QueryRow("SELECT * FROM users WHERE login_name = ?", params.LoginName).Scan(&user.ID, &user.LoginName, &user.Nickname, &user.PassHash); err != sql.ErrNoRows {
-		//	tx.Rollback()
-		//	if err == nil {
-		//		return resError(c, "duplicated", 409)
-		//	}
-		//	return err
-	        //}
+		if err := tx.QueryRow("SELECT login_name FROM users WHERE login_name = ?", params.LoginName).Scan(&login_name); err != sql.ErrNoRows {
+			tx.Rollback()
+			if err == nil {
+				return resError(c, "duplicated", 409)
+			}
+			return err
+	    }
 
 		res, err := tx.Exec("INSERT INTO users (login_name, pass_hash, nickname) VALUES (?, SHA2(?, 256), ?)", params.LoginName, params.Password, params.Nickname)
 		if err != nil {
@@ -436,6 +442,9 @@ func main() {
 			if err := rows.Scan(&reservation.ID, &reservation.EventID, &reservation.SheetID, &reservation.UserID, &reservation.ReservedAt, &reservation.CanceledAt, &sheet.Rank, &sheet.Num); err != nil {
 				return err
 			}
+            log.Println("@@@@@@@@@@@\n")
+            fmt.Printf("%+v\n", reservation)
+            log.Println("@@@@@@@@@@@\n")
 
 			event, err := getEvent(reservation.EventID, -1)
 			if err != nil {
@@ -460,10 +469,23 @@ func main() {
 			recentReservations = make([]Reservation, 0)
 		}
 
-		var totalPrice int
-		if err := db.QueryRow("SELECT IFNULL(SUM(e.price + s.price), 0) FROM reservations r INNER JOIN sheets s ON s.id = r.sheet_id INNER JOIN events e ON e.id = r.event_id WHERE r.user_id = ? AND r.canceled_at IS NULL", user.ID).Scan(&totalPrice); err != nil {
-			return err
-		}
+        var totalPrice = 0
+        fmt.Println("total_price:" + fmt.Sprintf("%d", user.ID))
+        val2, err := cache.Get("total_price:" + fmt.Sprintf("%d", user.ID)).Result()
+
+        if err == redis.Nil {
+            fmt.Println("key2 does not exist")
+            totalPrice = 0
+        } else if err != nil {
+            return err
+        } else {
+            fmt.Println("key2", val2)
+            v, e := strconv.Atoi(val2)
+            if e != nil {
+                return e
+            }
+            totalPrice = v
+        }
 
 		rows, err = db.Query("SELECT event_id FROM reservations WHERE user_id = ? GROUP BY event_id ORDER BY MAX(IFNULL(canceled_at, reserved_at)) DESC LIMIT 5", user.ID)
 		if err != nil {
@@ -595,6 +617,23 @@ func main() {
 
 		var sheet Sheet
 		var reservationID int64
+        var totalPrice = 0
+
+        //cacheを使う
+        var key = "total_price:" + fmt.Sprintf("%d", user.ID)
+
+        val, cachErr := cache.Get(key).Result()
+        if cachErr == redis.Nil {
+            totalPrice = 0
+        } else if err != nil {
+            return err
+        } else {
+            totalPrice, err = strconv.Atoi(val)
+            if err != nil {
+              return err
+            }
+        }
+
 		for {
 			if err := db.QueryRow("SELECT * FROM sheets WHERE id NOT IN (SELECT sheet_id FROM reservations WHERE event_id = ? AND canceled_at IS NULL FOR UPDATE) AND `rank` = ? ORDER BY RAND() LIMIT 1", event.ID, params.Rank).Scan(&sheet.ID, &sheet.Rank, &sheet.Num, &sheet.Price); err != nil {
 				if err == sql.ErrNoRows {
@@ -602,6 +641,8 @@ func main() {
 				}
 				return err
 			}
+
+            totalPrice +=  int(sheet.Price)
 
 			tx, err := db.Begin()
 			if err != nil {
@@ -628,6 +669,11 @@ func main() {
 
 			break
 		}
+        // cacheのtotalpriceを更新
+        cacheSetErr := cache.Set(key, totalPrice, 0).Err()
+        if cacheSetErr != nil {
+            return cacheSetErr
+        }
 		return c.JSON(202, echo.Map{
 			"id":         reservationID,
 			"sheet_rank": params.Rank,
