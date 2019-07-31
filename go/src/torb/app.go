@@ -21,6 +21,7 @@ import (
 	"github.com/labstack/echo"
 	"github.com/labstack/echo-contrib/session"
 	"github.com/labstack/echo/middleware"
+	"github.com/go-redis/redis"
 )
 
 type User struct {
@@ -308,6 +309,7 @@ func (r *Renderer) Render(w io.Writer, name string, data interface{}, c echo.Con
 }
 
 var db *sql.DB
+var cache *redis.Client
 
 func main() {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4",
@@ -321,6 +323,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+    cache = redis.NewClient(&redis.Options{
+        Addr:     "localhost:6379",
+        Password: "", // no password set
+        DB:       0,  // use default DB
+    })
+    fmt.Sprintf("%+v", cache)
 
 	e := echo.New()
 	funcs := template.FuncMap{
