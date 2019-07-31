@@ -373,14 +373,14 @@ func main() {
 			return err
 		}
 
-		var user User
-		if err := tx.QueryRow("SELECT * FROM users WHERE login_name = ?", params.LoginName).Scan(&user.ID, &user.LoginName, &user.Nickname, &user.PassHash); err != sql.ErrNoRows {
-			tx.Rollback()
-			if err == nil {
-				return resError(c, "duplicated", 409)
-			}
-			return err
-		}
+		//  var user User
+		// if err := tx.QueryRow("SELECT * FROM users WHERE login_name = ?", params.LoginName).Scan(&user.ID, &user.LoginName, &user.Nickname, &user.PassHash); err != sql.ErrNoRows {
+		//	tx.Rollback()
+		//	if err == nil {
+		//		return resError(c, "duplicated", 409)
+		//	}
+		//	return err
+	        //}
 
 		res, err := tx.Exec("INSERT INTO users (login_name, pass_hash, nickname) VALUES (?, SHA2(?, 256), ?)", params.LoginName, params.Password, params.Nickname)
 		if err != nil {
